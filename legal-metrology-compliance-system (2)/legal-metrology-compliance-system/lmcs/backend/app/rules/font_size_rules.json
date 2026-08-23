@@ -1,0 +1,25 @@
+{
+  "_meta": {
+    "source": "Commonly cited area-based minimum character-height table applied under Legal Metrology labelling practice (derived from the erstwhile Standards of Weights & Measures (Packaged Commodities) Rules, 1977, Rule 8, carried forward in departmental practice).",
+    "disclaimer": "IMPORTANT: Verify these thresholds against the current Gazette-notified text of Rule 6 / the Second Schedule before relying on this table for any enforcement action. This table is intentionally kept as editable configuration (not hard-coded logic) so a Legal Metrology officer can correct it without a code change.",
+    "unit": "principal_display_panel_area_cm2 -> minimum_character_height_mm",
+    "version": "1.0.0"
+  },
+  "net_quantity_font_table": [
+    { "max_area_cm2": 100, "min_height_mm": 1 },
+    { "max_area_cm2": 500, "min_height_mm": 2 },
+    { "max_area_cm2": null, "min_height_mm": 4 }
+  ],
+  "declaration_min_height_mm": {
+    "default": 1.5,
+    "mrp": 2,
+    "net_quantity": 2,
+    "notes": "Applied as a general legibility floor for all other mandatory declarations when panel-area-specific rules do not apply. Officers can override per-declaration minimums in Settings."
+  },
+  "readability_checks": {
+    "min_contrast_ratio": 3.0,
+    "max_rotation_degrees": 15,
+    "min_dpi_equivalent": 150,
+    "notes": "Contrast ratio and rotation are software-readability proxies (not literal statutory text) to flag labels an average consumer would struggle to read."
+  }
+}

@@ -1,0 +1,164 @@
+{
+  "_meta": {
+    "source": "Legal Metrology (Packaged Commodities) Rules, 2011 - Rule 6, read with the Legal Metrology Act, 2009 (Sec 18)",
+    "disclaimer": "This ruleset is a software encoding of publicly available summaries of Rule 6 for the purpose of automated screening. It is NOT a substitute for legal advice and MUST be reviewed and signed off by a Legal Metrology / legal compliance officer before use in any enforcement decision. Verify clause numbers against the current consolidated Rules (as amended) on consumeraffairs.gov.in before production use.",
+    "last_reviewed": "2026-08-22",
+    "version": "1.0.0"
+  },
+  "declarations": [
+    {
+      "code": "MFR_NAME_ADDR",
+      "title": "Name and address of manufacturer/packer/importer",
+      "rule_ref": "Rule 6(1)(a)",
+      "mandatory": true,
+      "applies_to": "all",
+      "detection": {
+        "type": "keyword_and_address_pattern",
+        "keywords": ["manufactured by", "mfg by", "marketed by", "packed by", "packer", "manufacturer", "imported by", "brand owner"],
+        "requires_address_pattern": true
+      },
+      "notes": "Where the manufacturer is not the packer, both must appear. For imported goods, importer's name and address is also mandatory. 'Marketed by' with full brand-owner address is acceptable per departmental FAQs.",
+      "severity": "critical"
+    },
+    {
+      "code": "COUNTRY_OF_ORIGIN",
+      "title": "Country of origin",
+      "rule_ref": "Rule 6(1)(a) / applicable to imported packages",
+      "mandatory": false,
+      "applies_to": "imported",
+      "detection": {
+        "type": "keyword",
+        "keywords": ["country of origin", "made in", "product of"]
+      },
+      "notes": "Mandatory only where the product is imported. Compliance engine flags this only when 'imported' flag is set for the product/listing.",
+      "severity": "major"
+    },
+    {
+      "code": "GENERIC_NAME",
+      "title": "Common or generic name of the commodity",
+      "rule_ref": "Rule 6(1)(b)",
+      "mandatory": true,
+      "applies_to": "all",
+      "detection": {
+        "type": "presence_heuristic",
+        "keywords": []
+      },
+      "notes": "For multi-product packages, name and quantity of each product must be declared.",
+      "severity": "critical"
+    },
+    {
+      "code": "NET_QUANTITY",
+      "title": "Net quantity in standard units (weight/volume/number)",
+      "rule_ref": "Rule 6(1)(c), Rule 8-11",
+      "mandatory": true,
+      "applies_to": "all",
+      "detection": {
+        "type": "regex",
+        "patterns": [
+  "\\b\\d+(?:\\.\\d+)?\\s?(g|gm|gram|grams|kg|kilogram|kilograms|ml|millilitre|milliliter|l|litre|liter|mg|N|units?|pieces?|pcs)\\b",
+  "\\b(net\\s+quantity|net\\s+qty)\\s*[:\\-]?\\s*\\d+(?:\\.\\d+)?\\s?(g|gm|gram|grams|kg|kilogram|ml|l|mg|N|units?|pieces?|pcs)\\b"
+]      },
+      "notes": "Must be expressed in standard SI/legal units. Weight of packaging material must be excluded (Rule 11). Number of pieces required when sold by count.",
+      "severity": "critical"
+    },
+    {
+      "code": "MFG_DATE",
+      "title": "Month and year of manufacture / packing / import",
+      "rule_ref": "Rule 6(1)(e)",
+      "mandatory": true,
+      "applies_to": "all",
+      "detection": {
+        "type": "regex",
+        "patterns": [
+    "\\b(0[1-9]|1[0-2])[\\/\\-\\.](19|20)\\d{2}\\b",
+    "\\b(0?[1-9]|[12]\\d|3[01])[\\/\\-\\.](0?[1-9]|1[0-2])[\\/\\-\\.](19|20)\\d{2}\\b",
+    "\\b(0?[1-9]|[12]\\d|3[01])[\\/\\-\\.](0?[1-9]|1[0-2])[\\/\\-\\.](\\d{2})\\b",
+    "\\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\\.?\\s?(19|20)\\d{2}\\b",
+    "\\b(mfd|mfg|pkd|packed on|manufactured|date of manufacture|date of packing)[\\s\\S]{0,150}?(\\d{1,2}[\\/\\-\\.](\\d{1,2})[\\/\\-\\.](\\d{2,4})|\\d{4})"
+]   },
+      "notes": "May be expressed in words or numerals or both. Applying month/date via a separate sticker after original printing is prohibited by Rule 6(2), except for permitted MRP reductions.",
+      "severity": "critical"
+    },
+    {
+      "code": "MRP",
+      "title": "Maximum Retail Price (MRP), inclusive of all taxes",
+      "rule_ref": "Rule 6(1)(f), Rule 18",
+      "mandatory": true,
+      "applies_to": "all",
+      "detection": {
+        "type": "regex",
+     "patterns": [
+    "(mrp|m\\.r\\.p\\.?|maximum\\s+retail\\s+price)[^\\n]{0,80}(rs\\.?|inr|₹)?\\s*\\d+(?:\\.\\d{1,2})?",
+    "(mrp|m\\.r\\.p\\.?|maximum\\s+retail\\s+price)[\\s\\S]{0,250}?(rs\\.?|inr|₹)?\\s*\\d+(?:\\.\\d{1,2})?",
+    "(rs\\.?|inr|₹)\\s*\\d+(?:\\.\\d{1,2})?"
+]      },
+      "notes": "Must state 'inclusive of all taxes' or equivalent. Either ₹ symbol or 'Rs.' abbreviation is acceptable per Legal Metrology FAQs (Sept/Nov 2025).",
+      "severity": "critical"
+    },
+    {
+      "code": "UNIT_SALE_PRICE",
+      "title": "Unit sale price (price per standard unit)",
+      "rule_ref": "Rule 6(1)(f)/6(11)",
+      "mandatory": false,
+      "applies_to": "conditional",
+      "detection": {
+        "type": "regex",
+        "patterns": [
+  "(unit\\s+sale\\s+price|unit\\s+sate\\s+price)",
+  "\\busp\\s*[-:]?\\s*(?:rs\\.?|inr|₹|â‚¹)?\\s*\\d+(?:\\.\\d{1,2})?\\s*/\\s*(kg|g|gram|l|litre|liter|ml|unit|piece)",
+  "(price\\s+per\\s*(kg|kilogram|litre|liter|g|gram|ml|l|unit|piece))"
+]
+      },
+      "notes": "Not required where MRP equals unit sale price, and not required to be displayed on e-commerce websites (only required on the physical package itself).",
+      "severity": "minor"
+    },
+    {
+      "code": "CONSUMER_CARE",
+      "title": "Consumer care / contact details (name, address, telephone/email)",
+      "rule_ref": "Rule 6(1)(g)",
+      "mandatory": true,
+      "applies_to": "all",
+      "detection": {
+        "type": "keyword_and_regex",
+        "keywords": ["customer care", "consumer care", "for complaints", "toll free", "contact us", "helpline"],
+        "patterns": ["\\b\\d{10}\\b", "[a-z0-9._%+-]+@[a-z0-9.-]+\\.[a-z]{2,}"]
+      },
+      "notes": "Telephone number/email address, if available, must be declared along with name/address of contact person or office.",
+      "severity": "major"
+    },
+    {
+      "code": "ECOMMERCE_DECLARATIONS",
+      "title": "Mandatory declarations on e-commerce listing (excl. month/year of mfg)",
+      "rule_ref": "Rule 6(10)",
+      "mandatory": false,
+      "applies_to": "ecommerce_listing",
+      "detection": {
+        "type": "composite",
+        "requires_codes": ["MFR_NAME_ADDR", "GENERIC_NAME", "NET_QUANTITY", "MRP", "CONSUMER_CARE"]
+      },
+      "notes": "E-commerce entities must ensure all Rule 6(1) declarations appear on the digital listing, except month/year of manufacture/packing which is not required online.",
+      "severity": "major"
+    }
+  ],
+  "prohibited_practices": [
+    {
+      "code": "STICKER_OVER_MFG_MRP",
+      "title": "Individual stickers used to alter/declare date of manufacture or MRP",
+      "rule_ref": "Rule 6(2)",
+      "notes": "Prohibited except for legitimate reduced-MRP stickers that do not cover the original printed MRP declaration.",
+      "severity": "major"
+    },
+    {
+      "code": "MULTIPLE_MRP",
+      "title": "More than one MRP declared without clear superseding indication",
+      "rule_ref": "Rule 18",
+      "severity": "critical"
+    },
+    {
+      "code": "MISLEADING_CLAIM",
+      "title": "Misleading quantity/price claims (e.g. '1kg' printed larger than actual net content, or exaggerated free-quantity claims)",
+      "rule_ref": "Rule 6 / Sec 18 general principle",
+      "severity": "major"
+    }
+  ]
+}

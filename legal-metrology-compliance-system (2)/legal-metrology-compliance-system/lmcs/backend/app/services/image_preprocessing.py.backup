@@ -1,0 +1,78 @@
+"""
+Image preprocessing pipeline to improve OCR accuracy on real-world product
+label photographs (uneven lighting, skew, low contrast, glare).
+"""
+from __future__ import annotations
+import cv2
+import numpy as np
+
+
+def load_image(path: str) -> np.ndarray:
+    img = cv2.imread(path)
+    if img is None:
+        raise ValueError(f"Could not read image at {path}. File may be corrupt or unsupported.")
+    return img
+
+
+def estimate_skew_angle(gray: np.ndarray) -> float:
+    """Estimate rotation angle of the dominant text block using minAreaRect on thresholded pixels."""
+    thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV | cv2.THRESH_OTSU)[1]
+    coords = np.column_stack(np.where(thresh > 0))
+    if coords.shape[0] < 20:
+        return 0.0
+    angle = cv2.minAreaRect(coords)[-1]
+    if angle < -45:
+        angle = -(90 + angle)
+    else:
+        angle = -angle
+    # Guard against wild outliers from sparse/noisy label images
+    return float(angle) if abs(angle) <= 20 else 0.0
+
+
+def deskew(image: np.ndarray, angle: float) -> np.ndarray:
+    if abs(angle) < 0.3:
+        return image
+    (h, w) = image.shape[:2]
+    center = (w // 2, h // 2)
+    m = cv2.getRotationMatrix2D(center, angle, 1.0)
+    return cv2.warpAffine(image, m, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
+
+
+def normalize_illumination(gray: np.ndarray) -> np.ndarray:
+    """Correct uneven lighting/glare using a large-kernel background estimate."""
+    bg = cv2.medianBlur(gray, 41)
+    diff = cv2.absdiff(gray, bg)
+    norm = 255 - diff
+    return cv2.normalize(norm, None, 0, 255, cv2.NORM_MINMAX)
+
+
+def preprocess_for_ocr(path: str) -> dict:
+    """
+    Runs the full pipeline and returns both the cleaned image (for OCR) and
+    metadata needed for downstream measurements (e.g. pixel-to-mm scale proxy).
+    """
+    original = load_image(path)
+    gray = cv2.cvtColor(original, cv2.COLOR_BGR2GRAY)
+
+    angle = estimate_skew_angle(gray)
+    rotated = deskew(original, angle)
+    rotated_gray = cv2.cvtColor(rotated, cv2.COLOR_BGR2GRAY)
+
+    illum_corrected = normalize_illumination(rotated_gray)
+    denoised = cv2.fastNlMeansDenoising(illum_corrected, h=10)
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    contrast_enhanced = clahe.apply(denoised)
+
+    # Adaptive threshold works better than global Otsu for uneven label photos
+    binary = cv2.adaptiveThreshold(
+        contrast_enhanced, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 31, 11
+    )
+
+    return {
+        "original": original,
+        "ocr_ready": binary,
+        "gray_for_measurement": contrast_enhanced,
+        "skew_angle_deg": angle,
+        "height_px": original.shape[0],
+        "width_px": original.shape[1],
+    }

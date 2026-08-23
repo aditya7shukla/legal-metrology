@@ -1,0 +1,150 @@
+"""
+OCR extraction service.
+
+Responsibilities:
+  1. Run Tesseract OCR over the preprocessed image, returning word-level text
+     with bounding boxes and confidence.
+  2. Group words into lines/blocks for downstream declaration matching.
+  3. Estimate the printed character height of each text line in millimetres
+     so it can be checked against the font-size rule table.
+
+IMPORTANT LIMITATION (documented deliberately rather than hidden):
+Converting pixel height -> real-world millimetres requires knowing the
+physical scale of the photograph. Two supported modes:
+  (a) CALIBRATED: the officer photographs the label next to a reference
+      object of known width (e.g. an ISO/IEC ID-1 card, 85.60mm) OR the
+      client app captures the true sensor distance/DPI. `calibration_mm_per_px`
+      is then supplied by the caller.
+  (b) UNCALIBRATED (default): the system falls back to a configurable assumed
+      DPI (see settings) and clearly marks every font measurement with
+      `confidence = "estimated"` so officers know to visually verify borderline
+      cases rather than rely on the number alone.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Optional
+
+import pytesseract
+from pytesseract import Output
+
+from app.config import settings
+from app.services.image_preprocessing import preprocess_for_ocr
+
+if settings.TESSERACT_CMD:
+    pytesseract.pytesseract.tesseract_cmd = settings.TESSERACT_CMD
+
+# Fallback assumption when no physical calibration reference is available.
+# 300 DPI is a common "print-quality scan" reference used only as a last resort.
+ASSUMED_DPI_FALLBACK = 300
+MM_PER_INCH = 25.4
+
+
+@dataclass
+class TextLine:
+    text: str
+    x: int
+    y: int
+    width: int
+    height: int
+    confidence: float
+    block_num: int
+    line_num: int
+
+
+@dataclass
+class OcrResult:
+    full_text: str
+    lines: list[TextLine] = field(default_factory=list)
+    image_width_px: int = 0
+    image_height_px: int = 0
+    skew_angle_deg: float = 0.0
+
+
+def run_ocr(image_path: str) -> OcrResult:
+    prep = preprocess_for_ocr(image_path)
+    ocr_image = prep["ocr_ready"]
+
+    data = pytesseract.image_to_data(
+        ocr_image,
+        lang=settings.OCR_LANGUAGES,
+        output_type=Output.DICT,
+        config="--oem 3 --psm 6",
+    )
+
+    lines_map: dict[tuple[int, int], list[dict]] = {}
+    n = len(data["text"])
+    for i in range(n):
+        word = data["text"][i].strip()
+        conf = float(data["conf"][i]) if data["conf"][i] not in ("-1", -1) else -1.0
+        if not word or conf < 0:
+            continue
+        key = (int(data["block_num"][i]), int(data["line_num"][i]))
+        lines_map.setdefault(key, []).append(
+            {
+                "word": word,
+                "left": int(data["left"][i]),
+                "top": int(data["top"][i]),
+                "width": int(data["width"][i]),
+                "height": int(data["height"][i]),
+                "conf": conf,
+            }
+        )
+
+    text_lines: list[TextLine] = []
+    all_words: list[str] = []
+    for (block_num, line_num), words in sorted(lines_map.items()):
+        text = " ".join(w["word"] for w in words)
+        all_words.append(text)
+        x0 = min(w["left"] for w in words)
+        y0 = min(w["top"] for w in words)
+        x1 = max(w["left"] + w["width"] for w in words)
+        y1 = max(w["top"] + w["height"] for w in words)
+        avg_conf = sum(w["conf"] for w in words) / len(words)
+        text_lines.append(
+            TextLine(
+                text=text,
+                x=x0,
+                y=y0,
+                width=x1 - x0,
+                height=y1 - y0,
+                confidence=round(avg_conf, 1),
+                block_num=block_num,
+                line_num=line_num,
+            )
+        )
+
+    return OcrResult(
+        full_text="\n".join(all_words),
+        lines=text_lines,
+        image_width_px=prep["width_px"],
+        image_height_px=prep["height_px"],
+        skew_angle_deg=prep["skew_angle_deg"],
+    )
+
+
+def px_to_mm(height_px: int, calibration_mm_per_px: Optional[float]) -> tuple[float, str]:
+    """Returns (height_mm, confidence_label)."""
+    if calibration_mm_per_px:
+        return round(height_px * calibration_mm_per_px, 2), "calibrated"
+    mm_per_px = MM_PER_INCH / ASSUMED_DPI_FALLBACK
+    return round(height_px * mm_per_px, 2), "estimated"
+
+
+def analyze_font_sizes(
+    ocr_result: OcrResult, calibration_mm_per_px: Optional[float] = None
+) -> list[dict]:
+    """Produces a per-line font-size measurement report used by the rule engine."""
+    measurements = []
+    for line in ocr_result.lines:
+        height_mm, confidence = px_to_mm(line.height, calibration_mm_per_px)
+        measurements.append(
+            {
+                "text": line.text,
+                "bbox": {"x": line.x, "y": line.y, "width": line.width, "height": line.height},
+                "ocr_confidence_pct": line.confidence,
+                "estimated_height_mm": height_mm,
+                "measurement_confidence": confidence,
+            }
+        )
+    return measurements
