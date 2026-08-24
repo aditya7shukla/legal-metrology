@@ -5,6 +5,7 @@ import {
 } from "recharts";
 import api from "../api/client";
 import Layout from "../components/Layout";
+import { Link } from "react-router-dom";
 
 const PIE_COLORS = ["#15803D", "#C2410C", "#B91C1C"];
 
@@ -31,20 +32,13 @@ export default function Dashboard() {
 
   return (
     <Layout>
-      <div className="flex items-center justify-between mb-6">
+      <div className="mb-7 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h2 className="text-2xl font-bold text-gray-900">Enforcement Dashboard</h2>
-          <p className="text-sm text-gray-500">Overview of scanning and compliance activity.</p>
+          <p className="page-kicker">Overview</p>
+          <h2 className="page-title">Inspection dashboard</h2>
+          <p className="page-subtitle">Monitor screening activity, report outcomes, and common issues.</p>
         </div>
-        <select
-          value={days} onChange={(e) => setDays(Number(e.target.value))}
-          className="input w-40"
-        >
-          <option value={7}>Last 7 days</option>
-          <option value={30}>Last 30 days</option>
-          <option value={90}>Last 90 days</option>
-          <option value={365}>Last year</option>
-        </select>
+        <div className="flex gap-2"><select value={days} onChange={(e) => setDays(Number(e.target.value))} className="input w-36"><option value={7}>Last 7 days</option><option value={30}>Last 30 days</option><option value={90}>Last 90 days</option><option value={365}>Last year</option></select><Link to="/scan" className="btn-primary whitespace-nowrap">New inspection</Link></div>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
@@ -102,9 +96,10 @@ export default function Dashboard() {
 
 function StatCard({ label, value, accent = "text-gray-900" }) {
   return (
-    <div className="card">
-      <p className="text-xs text-gray-500 mb-1">{label}</p>
-      <p className={`text-2xl font-bold ${accent}`}>{value}</p>
+    <div className="card relative overflow-hidden">
+      <div className="absolute right-0 top-0 h-16 w-16 rounded-bl-full bg-brand-50" />
+      <p className="relative mb-2 text-xs font-semibold uppercase tracking-wider text-gray-500">{label}</p>
+      <p className={`relative text-3xl font-bold tracking-tight ${accent}`}>{value}</p>
     </div>
   );
 }

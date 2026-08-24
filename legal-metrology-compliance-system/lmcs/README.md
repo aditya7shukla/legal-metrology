@@ -68,7 +68,7 @@ docker compose up --build
 ```bash
 cd backend
 python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
+
 # Requires the tesseract-ocr system package: `apt install tesseract-ocr` (Linux) / `brew install tesseract` (Mac)
 cp .env.example .env
 python -m scripts.seed          # creates demo admin/officer accounts + sample products
@@ -122,4 +122,4 @@ pytest tests/ -v
 Reference implementation built against publicly available summaries of the
 Legal Metrology Act, 2009 and the Legal Metrology (Packaged Commodities)
 Rules, 2011 (see https://consumeraffairs.gov.in/pages/legal-metrology-act).
-Not affiliated with or endorsed by the Department of Consumer Affairs.
+Not affiliated with or endorsed by the Department of Consumer Affairs.pip install -r requirements.txt
