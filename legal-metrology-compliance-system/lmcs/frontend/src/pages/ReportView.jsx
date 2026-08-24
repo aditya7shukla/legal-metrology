@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import api from "../api/client";
+import api, { downloadReport } from "../api/client";
 import Layout from "../components/Layout";
 import { StatusBadge, SeverityBadge, ScoreRing } from "../components/Badges";
 import { useAuth } from "../context/AuthContext";
@@ -11,11 +11,13 @@ export default function ReportView() {
   const { reportId } = useParams();
   const { user } = useAuth();
   const [report, setReport] = useState(null);
+  const [diagnostic, setDiagnostic] = useState(null);
   const [notes, setNotes] = useState("");
   const [overrideStatus, setOverrideStatus] = useState("");
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [downloadError, setDownloadError] = useState("");
 
   const canReview = user?.role === "admin" || user?.role === "officer";
 
@@ -25,6 +27,7 @@ export default function ReportView() {
       .then((res) => { setReport(res.data); setNotes(res.data.reviewer_notes || ""); })
       .catch(() => setError("Could not load this report."))
       .finally(() => setLoading(false));
+    api.get(`/reports/${reportId}/diagnostic`).then((res) => setDiagnostic(res.data)).catch(() => setDiagnostic(null));
   };
 
   useEffect(load, [reportId]);
@@ -40,6 +43,15 @@ export default function ReportView() {
       setOverrideStatus("");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleDownload = async (format) => {
+    setDownloadError("");
+    try {
+      await downloadReport(report.id, format);
+    } catch (err) {
+      setDownloadError(err.response?.status === 404 ? "The report file is not available yet." : "Could not download the report. Please sign in again and retry.");
     }
   };
 
@@ -68,13 +80,10 @@ export default function ReportView() {
         </div>
         <p className="text-sm text-gray-600 mt-4">{report.summary}</p>
         <div className="flex gap-3 mt-4">
-          <a href={`/api/v1/reports/${report.id}/download/pdf`} target="_blank" rel="noreferrer" className="btn-secondary text-sm">
-            Download PDF
-          </a>
-          <a href={`/api/v1/reports/${report.id}/download/docx`} target="_blank" rel="noreferrer" className="btn-secondary text-sm">
-            Download Editable DOCX
-          </a>
+          <button type="button" onClick={() => handleDownload("pdf")} className="btn-secondary text-sm">Download PDF</button>
+          <button type="button" onClick={() => handleDownload("docx")} className="btn-secondary text-sm">Download Editable DOCX</button>
         </div>
+        {downloadError && <p className="mt-3 text-sm text-red-600">{downloadError}</p>}
       </div>
 
       <h3 className="text-lg font-semibold text-gray-900 mb-3">
@@ -109,6 +118,38 @@ export default function ReportView() {
           )}
         </div>
       )}
+
+      <details className="card mb-6 group">
+        <summary className="cursor-pointer list-none flex items-center justify-between gap-4">
+          <div>
+            <p className="font-semibold text-slate-900">OCR diagnostic</p>
+            <p className="mt-1 text-sm text-slate-500">See the exact text used for the automated rule checks.</p>
+          </div>
+          <span className="text-brand-600 text-sm font-medium group-open:hidden">Show</span>
+          <span className="text-brand-600 text-sm font-medium hidden group-open:inline">Hide</span>
+        </summary>
+        <div className="mt-4 border-t border-slate-100 pt-4">
+          {diagnostic?.extracted_fields?.declarations_found?.length > 0 && (
+            <div className="mb-4">
+              <p className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-500">Matched declaration evidence</p>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {diagnostic.extracted_fields.declarations_found.map((item) => (
+                  <div key={item.code} className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs">
+                    <p className="font-semibold text-slate-800">{item.title}</p>
+                    <p className="mt-1 break-words text-slate-600">{item.matched}</p>
+                    {item.evidence?.[0] && <p className="mt-1 text-slate-400">Image {item.evidence[0].image_index + 1} · x:{item.evidence[0].x}, y:{item.evidence[0].y} · OCR {Math.round(item.evidence[0].confidence)}%</p>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {diagnostic?.raw_ocr_text ? (
+            <pre className="max-h-80 overflow-auto whitespace-pre-wrap rounded-xl bg-slate-950 p-4 text-xs leading-5 text-slate-100">{diagnostic.raw_ocr_text}</pre>
+          ) : (
+            <p className="rounded-xl bg-amber-50 p-4 text-sm text-amber-800">No OCR text was retained for this scan. This means the system could not provide evidence for its automated findings.</p>
+          )}
+        </div>
+      </details>
 
       {canReview && (
         <div className="card">

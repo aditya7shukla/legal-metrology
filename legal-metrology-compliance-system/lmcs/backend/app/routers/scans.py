@@ -8,12 +8,13 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import (
-    ScanRecord, ScanStatus, Product, ComplianceReport, ViolationDetail,
+    ScanRecord, ScanImage, ScanStatus, Product, ComplianceReport, ViolationDetail,
     ComplianceStatus, ViolationSeverity, User, UserRole, AuditLog,
 )
 from app.schemas import ScanOut, ProductCreate, PaginatedResponse
 from app.security import get_current_user, require_roles
-from app.services.ocr_service import run_ocr, analyze_font_sizes
+from app.services.ocr_service import run_ocr, analyze_font_sizes, OCRUnavailableError, OCRExtractionError
+from app.services.image_quality import assess_image_quality
 from app.services.rule_engine import evaluate_compliance
 from app.services.report_generator import generate_pdf_report, generate_docx_report
 from app.utils.file_storage import save_upload
@@ -40,6 +41,7 @@ def _get_or_create_product(db: Session, product_id: Optional[str], new_product_j
 @router.post("", response_model=ScanOut, status_code=201)
 def create_and_process_scan(
     image: UploadFile = File(...),
+    supporting_images: list[UploadFile] = File(default=[]),
     product_id: Optional[str] = Form(None),
     new_product: Optional[str] = Form(None, description="JSON-encoded ProductCreate payload"),
     listing_type: str = Form("physical_package"),
@@ -64,6 +66,10 @@ def create_and_process_scan(
     """
     product = _get_or_create_product(db, product_id, new_product)
     image_path, thumb_path = save_upload(image)
+    supporting = [(uploaded, *save_upload(uploaded)) for uploaded in supporting_images[:3]]
+    image_paths = [(image.filename, image_path, True)] + [
+        (uploaded.filename, path, False) for uploaded, path, _thumb in supporting
+    ]
 
     scan = ScanRecord(
         product_id=product.id,
@@ -81,24 +87,49 @@ def create_and_process_scan(
     db.commit()
     db.refresh(scan)
 
+    quality_assessments = []
+    for filename, path, is_primary in image_paths:
+        assessment = assess_image_quality(path)
+        quality_assessments.append({"filename": filename, "is_primary": is_primary, **assessment})
+        db.add(ScanImage(scan_id=scan.id, image_path=path, original_filename=filename, is_primary=is_primary, quality_assessment=assessment))
+    db.commit()
+
     try:
-        ocr_result = run_ocr(image_path)
+        ocr_results = []
+        extraction_errors = []
+        for filename, path, _is_primary in image_paths:
+            try:
+                ocr_results.append(run_ocr(path))
+            except OCRExtractionError as exc:
+                extraction_errors.append(f"{filename}: {exc}")
+        if not ocr_results:
+            raise OCRExtractionError("No readable text was extracted from any uploaded image. " + " ".join(extraction_errors))
+        ocr_result = ocr_results[0]
+        combined_text = "\n\n".join(result.full_text for result in ocr_results)
+        ocr_lines = [
+            {"image_index": image_index, "text": line.text, "x": line.x, "y": line.y,
+             "width": line.width, "height": line.height, "confidence": line.confidence}
+            for image_index, result in enumerate(ocr_results)
+            for line in result.lines
+        ]
         font_measurements = analyze_font_sizes(ocr_result, calibration_mm_per_px)
 
         compliance = evaluate_compliance(
-            full_text=ocr_result.full_text,
+            full_text=combined_text,
             is_imported=product.is_imported,
             listing_type=listing_type,
             font_measurements=font_measurements,
             panel_area_cm2=panel_area_cm2,
+            ocr_lines=ocr_lines,
         )
 
-        scan.raw_ocr_text = ocr_result.full_text
-        scan.extracted_fields = {"declarations_found": compliance["declarations_found"]}
+        scan.raw_ocr_text = combined_text
+        scan.extracted_fields = {"declarations_found": compliance["declarations_found"], "structured_values": compliance["structured_values"]}
         scan.font_analysis = {
             "measurements": font_measurements,
             "required_min_mm": compliance["font_requirement_mm"],
             "skew_angle_deg": ocr_result.skew_angle_deg,
+            "image_quality": quality_assessments,
         }
         scan.status = ScanStatus.COMPLETED
         scan.completed_at = datetime.utcnow()
@@ -159,6 +190,13 @@ def create_and_process_scan(
         ))
         db.commit()
 
+    except (OCRUnavailableError, OCRExtractionError) as exc:
+        db.rollback()
+        scan.status = ScanStatus.FAILED
+        scan.error_message = str(exc)
+        db.add(scan)
+        db.commit()
+        raise HTTPException(status_code=503 if isinstance(exc, OCRUnavailableError) else 422, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
         db.rollback()
         scan.status = ScanStatus.FAILED

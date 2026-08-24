@@ -25,6 +25,48 @@ with open(RULES_DIR / "font_size_rules.json", encoding="utf-8") as f:
 SEVERITY_WEIGHTS = {"critical": 30, "major": 15, "minor": 5}
 
 
+def _normalized_compact(value: str) -> str:
+    """OCR-insensitive form for abbreviations split by punctuation or spaces."""
+    return re.sub(r"[^a-z0-9]+", "", (value or "").lower())
+
+
+def _extract_structured_values(text: str) -> dict[str, str]:
+    """Extract validated values even when a value sits beside/below its heading."""
+    values: dict[str, str] = {}
+    normalized = re.sub(r"\s+", " ", text or "")
+    money = r"(?:₹|rs\.?|inr)\s*\d+(?:\.\d{1,2})?"
+
+    mrp = re.search(rf"(?:m\s*\.?\s*r\s*\.?\s*p|maximum\s+retail\s+price).{{0,100}}?({money})", normalized, re.I)
+    if mrp:
+        values["MRP"] = mrp.group(0)
+    usp = re.search(rf"\bu\s*\.?\s*s\s*\.?\s*p\b.{{0,120}}?({money})", normalized, re.I)
+    if usp:
+        values["UNIT_SALE_PRICE"] = usp.group(0)
+    quantity = re.search(r"(?:net\s*(?:quantity|qty)\s*[:=-]?\s*).{0,80}?(\d+(?:\.\d+)?\s*(?:kg|g|gm|mg|ml|l|litre|liter|n|units?|pieces?|pcs))\b", normalized, re.I)
+    if quantity:
+        values["NET_QUANTITY"] = quantity.group(1)
+    date = re.search(r"(?:mfd|mfg|manufactured|packed\s+on|date\s+of\s+(?:manufacture|packing))[^\n]{0,100}?((?:0?[1-9]|[12]\d|3[01])[/-](?:0?[1-9]|1[0-2])[/-](?:\d{2}|19\d{2}|20\d{2})|(?:0[1-9]|1[0-2])[/-](?:19|20)\d{2}|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s*(?:19|20)\d{2})", normalized, re.I)
+    if date:
+        values["MFG_DATE"] = date.group(1)
+    email = re.search(r"[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}", normalized, re.I)
+    phone = re.search(r"\b(?:\+91[-\s]?)?[6-9]\d(?:[-\s]?\d){8}\b|\b0?\d{2,4}[-\s]?\d{6,8}\b", normalized)
+    if email or phone:
+        values["CONSUMER_CARE"] = (email or phone).group(0)
+    return values
+
+
+def _line_evidence(snippet: Optional[str], ocr_lines: list[dict] | None) -> list[dict]:
+    if not snippet or not ocr_lines:
+        return []
+    terms = set(re.findall(r"[a-z0-9]{2,}", snippet.lower()))
+    matches = []
+    for line in ocr_lines:
+        line_terms = set(re.findall(r"[a-z0-9]{2,}", (line.get("text") or "").lower()))
+        if terms and len(terms & line_terms) / len(terms) >= 0.35:
+            matches.append({key: line.get(key) for key in ("image_index", "text", "x", "y", "width", "height", "confidence")})
+    return matches[:3]
+
+
 def _text_matches_detection(
     full_text: str,
     detection: dict,
@@ -73,8 +115,10 @@ def _text_matches_detection(
                 kw.lower(),
             ).strip()
 
-            if kw_normalized in normalized:
+            if kw_normalized in normalized or _normalized_compact(kw_normalized) in _normalized_compact(normalized):
                 idx = normalized.find(kw_normalized)
+                if idx < 0:
+                    idx = 0
 
                 return (
                     True,
@@ -248,6 +292,7 @@ def evaluate_compliance(
     listing_type: str,
     font_measurements: list[dict],
     panel_area_cm2: Optional[float] = None,
+    ocr_lines: list[dict] | None = None,
 ) -> dict:
     """
     Main entry point. Returns a structured compliance result:
@@ -261,6 +306,7 @@ def evaluate_compliance(
     violations = []
     found_declarations = []
     max_possible_score = 0
+    structured_values = _extract_structured_values(full_text)
 
     min_font_required = _panel_font_requirement(panel_area_cm2)
 
@@ -296,9 +342,20 @@ def evaluate_compliance(
         if applies == "ecommerce_listing" and listing_type != "ecommerce_listing":
             continue
         if applies == "conditional" and decl["code"] == "UNIT_SALE_PRICE":
-            # Skipped by default: exemption when MRP == unit sale price is common;
-            # flagged as minor/informational rather than a hard violation.
-            pass
+            # The MRP-equals-USP exemption cannot be inferred reliably from a
+            # photograph. A visible USP heading is useful evidence, but an
+            # unreadable value must be reviewed by an officer, not converted
+            # into an automatic missing-declaration finding.
+            found, snippet = _text_matches_detection(full_text, decl["detection"])
+            if not found:
+                usp_heading = re.search(r"\bu\s*s\s*p\b", full_text, flags=re.IGNORECASE)
+                if usp_heading:
+                    found = True
+                    snippet = usp_heading.group(0)
+            if found:
+                snippet = structured_values.get("UNIT_SALE_PRICE", snippet)
+                found_declarations.append({"code": decl["code"], "title": decl["title"], "matched": snippet, "evidence": _line_evidence(snippet, ocr_lines)})
+            continue
 
         max_possible_score += SEVERITY_WEIGHTS.get(decl["severity"], 10)
 
@@ -321,6 +378,14 @@ def evaluate_compliance(
             continue
 
         found, snippet = _text_matches_detection(full_text, decl["detection"])
+        # These declarations are only valid when both their heading/context and
+        # structured value survive OCR. A random number (e.g. phone status-bar
+        # "5G") or blank template heading must never satisfy them.
+        strict_value_codes = {"MRP", "NET_QUANTITY", "MFG_DATE"}
+        if decl["code"] in structured_values:
+            found, snippet = True, structured_values[decl["code"]]
+        elif decl["code"] in strict_value_codes:
+            found, snippet = False, None
 
         if not found:
             severity = decl["severity"]
@@ -339,7 +404,7 @@ def evaluate_compliance(
                 }
             )
         else:
-            found_declarations.append({"code": decl["code"], "title": decl["title"], "matched": snippet})
+            found_declarations.append({"code": decl["code"], "title": decl["title"], "matched": snippet, "evidence": _line_evidence(snippet, ocr_lines)})
 
         # --- Font size / readability checks ---
         #
@@ -423,4 +488,5 @@ def evaluate_compliance(
         "declarations_found": found_declarations,
         "violations": violations,
         "font_requirement_mm": min_font_required,
+        "structured_values": structured_values,
     }

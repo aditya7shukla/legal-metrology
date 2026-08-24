@@ -44,3 +44,21 @@ api.interceptors.response.use(
 );
 
 export default api;
+
+export async function downloadReport(reportId, format) {
+  const response = await api.get(`/reports/${reportId}/download/${format}`, {
+    responseType: "blob",
+  });
+  const fallbackName = `compliance_report_${reportId}.${format}`;
+  const disposition = response.headers["content-disposition"] || "";
+  const matched = disposition.match(/filename="?([^";]+)"?/i);
+  const filename = matched?.[1] || fallbackName;
+  const url = URL.createObjectURL(response.data);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}

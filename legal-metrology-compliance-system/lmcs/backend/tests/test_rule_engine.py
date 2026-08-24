@@ -69,3 +69,39 @@ def test_ecommerce_listing_does_not_require_mfg_month_physically_but_checks_comp
     # but ECOMMERCE_DECLARATIONS composite should pass since core fields present)
     ecom = [v for v in result["violations"] if v["declaration_code"] == "ECOMMERCE_DECLARATIONS"]
     assert not ecom
+
+
+def test_usp_heading_is_recognized_but_never_auto_flagged_when_conditional():
+    text = "Net Quantity: 100 N MRP Rs. 110.00 USP Rs. Per N"
+    result = evaluate_compliance(
+        full_text=text, is_imported=False, listing_type="physical_package", font_measurements=[],
+    )
+    found_codes = [item["code"] for item in result["declarations_found"]]
+    violation_codes = [item["declaration_code"] for item in result["violations"]]
+    assert "UNIT_SALE_PRICE" in found_codes
+    assert "UNIT_SALE_PRICE" not in violation_codes
+
+
+def test_structured_values_accept_split_abbreviations_and_nearby_values():
+    text = "M. R. P. : Rs. 110.00\nU S P Per N : INR 1.10\nNet Quantity 100 N\nMfd 07/2026"
+    result = evaluate_compliance(
+        full_text=text, is_imported=False, listing_type="physical_package", font_measurements=[],
+    )
+    assert "Rs. 110.00" in result["structured_values"]["MRP"]
+    assert "INR 1.10" in result["structured_values"]["UNIT_SALE_PRICE"]
+    assert result["structured_values"]["NET_QUANTITY"] == "100 N"
+    assert result["structured_values"]["MFG_DATE"] == "07/2026"
+
+
+def test_blank_template_and_phone_status_text_do_not_satisfy_declarations():
+    text = "9:39 WhatsApp 5G MRP : Rs USP : Rs Mfg. date : Batch No. : 822387"
+    result = evaluate_compliance(
+        full_text=text, is_imported=False, listing_type="physical_package", font_measurements=[],
+    )
+    found_codes = [item["code"] for item in result["declarations_found"]]
+    violation_codes = [item["declaration_code"] for item in result["violations"]]
+    assert "MRP" not in found_codes
+    assert "NET_QUANTITY" not in found_codes
+    assert "MFR_NAME_ADDR" not in found_codes
+    assert "MRP" in violation_codes
+    assert "NET_QUANTITY" in violation_codes

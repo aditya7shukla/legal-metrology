@@ -101,6 +101,7 @@ class ScanRecord(Base):
     compliance_report = relationship(
         "ComplianceReport", back_populates="scan", uselist=False, cascade="all, delete-orphan"
     )
+    images = relationship("ScanImage", back_populates="scan", cascade="all, delete-orphan")
 
     @property
     def report_id(self) -> str | None:
@@ -110,6 +111,21 @@ class ScanRecord(Base):
     def report_id(self) -> str | None:
         """Convenience accessor so API responses can link straight to the generated report."""
         return self.compliance_report.id if self.compliance_report else None
+
+
+class ScanImage(Base):
+    """Original plus optional close-up images captured for one inspection."""
+    __tablename__ = "scan_images"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    scan_id = Column(String, ForeignKey("scan_records.id"), nullable=False, index=True)
+    image_path = Column(String(500), nullable=False)
+    original_filename = Column(String(255), nullable=True)
+    is_primary = Column(Boolean, default=False, nullable=False)
+    quality_assessment = Column(JSON, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    scan = relationship("ScanRecord", back_populates="images")
 
 
 class ComplianceStatus(str, enum.Enum):

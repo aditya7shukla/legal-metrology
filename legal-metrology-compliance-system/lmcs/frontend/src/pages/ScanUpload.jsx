@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import api from "../api/client";
+import api, { downloadReport } from "../api/client";
 import Layout from "../components/Layout";
 import { StatusBadge, SeverityBadge, ScoreRing } from "../components/Badges";
 
@@ -17,6 +17,7 @@ export default function ScanUpload() {
   const [listingType, setListingType] = useState("physical_package");
   const [location, setLocation] = useState("");
   const [file, setFile] = useState(null);
+  const [supportingFiles, setSupportingFiles] = useState([]);
   const [preview, setPreview] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -43,6 +44,7 @@ export default function ScanUpload() {
     try {
       const form = new FormData();
       form.append("image", file);
+      supportingFiles.forEach((supportingFile) => form.append("supporting_images", supportingFile));
       if (mode === "existing") {
         if (!productId) throw new Error("Select a product from the repository, or switch to 'New product'.");
         form.append("product_id", productId);
@@ -65,6 +67,16 @@ export default function ScanUpload() {
       setError(err.response?.data?.detail || err.message || "Scan failed.");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleDownload = async (format) => {
+    if (!report) return;
+    setError("");
+    try {
+      await downloadReport(report.id, format);
+    } catch (err) {
+      setError(err.response?.status === 404 ? "The report file is not available yet." : "Could not download the report. Please sign in again and retry.");
     }
   };
 
@@ -142,6 +154,13 @@ export default function ScanUpload() {
             {preview && <img src={preview} alt="preview" className="mt-2 rounded-lg max-h-56 border" />}
           </div>
 
+          <div>
+            <label className="label">Close-up images (recommended)</label>
+            <input type="file" accept="image/*" multiple onChange={(e) => setSupportingFiles(Array.from(e.target.files).slice(0, 3))} className="text-sm" />
+            <p className="mt-1 text-xs text-slate-500">Add up to three close-ups of MRP/USP/MFD/batch fields. Avoid flash and reflections.</p>
+            {supportingFiles.length > 0 && <p className="mt-1 text-xs font-medium text-brand-700">{supportingFiles.length} close-up image(s) added</p>}
+          </div>
+
           {error && <p className="text-sm text-red-600">{error}</p>}
 
           <button type="submit" disabled={loading} className="btn-primary w-full">
@@ -163,6 +182,12 @@ export default function ScanUpload() {
               </div>
               {report ? (
                 <>
+                  {scanResult.font_analysis?.image_quality?.flatMap((item) => item.warnings || []).length > 0 && (
+                    <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                      <p className="font-semibold">Photo quality needs attention</p>
+                      <ul className="mt-1 list-disc pl-5 text-xs leading-5">{scanResult.font_analysis.image_quality.flatMap((item) => item.warnings || []).map((warning, index) => <li key={index}>{warning}</li>)}</ul>
+                    </div>
+                  )}
                   <div className="flex items-center gap-4">
                     <ScoreRing score={report.compliance_score} />
                     <StatusBadge status={report.overall_status} />
@@ -191,10 +216,8 @@ export default function ScanUpload() {
                     )}
                   </div>
                   <div className="flex gap-2 pt-2">
-                    <a href={`/api/v1/reports/${report.id}/download/pdf`} target="_blank" rel="noreferrer"
-                      className="btn-secondary text-sm">Download PDF</a>
-                    <a href={`/api/v1/reports/${report.id}/download/docx`} target="_blank" rel="noreferrer"
-                      className="btn-secondary text-sm">Download DOCX</a>
+                    <button type="button" onClick={() => handleDownload("pdf")} className="btn-secondary text-sm">Download PDF</button>
+                    <button type="button" onClick={() => handleDownload("docx")} className="btn-secondary text-sm">Download DOCX</button>
                     <button onClick={() => navigate(`/reports/${report.id}`)} className="btn-primary text-sm">
                       Open Full Report
                     </button>

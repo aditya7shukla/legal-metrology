@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import ComplianceReport, User, UserRole, AuditLog
-from app.schemas import ComplianceReportOut, ReportReviewUpdate, PaginatedResponse  # noqa: F401
+from app.schemas import ComplianceReportOut, ReportReviewUpdate, PaginatedResponse, ScanDiagnosticOut  # noqa: F401
 from app.security import get_current_user, require_roles
 
 router = APIRouter(prefix="/reports", tags=["Compliance Reports"])
@@ -43,6 +43,26 @@ def get_report(report_id: str, db: Session = Depends(get_db), current_user: User
     if not report:
         raise HTTPException(status_code=404, detail="Report not found.")
     return report
+
+
+@router.get("/{report_id}/diagnostic", response_model=ScanDiagnosticOut)
+def get_report_diagnostic(
+    report_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return the OCR evidence used to evaluate a report for officer review."""
+    report = db.query(ComplianceReport).filter(ComplianceReport.id == report_id).first()
+    if not report or not report.scan:
+        raise HTTPException(status_code=404, detail="Report or its source scan was not found.")
+    scan = report.scan
+    return ScanDiagnosticOut(
+        scan_id=scan.id,
+        image_original_filename=scan.image_original_filename,
+        raw_ocr_text=scan.raw_ocr_text,
+        extracted_fields=scan.extracted_fields,
+        font_analysis=scan.font_analysis,
+    )
 
 
 @router.patch("/{report_id}/review", response_model=ComplianceReportOut)

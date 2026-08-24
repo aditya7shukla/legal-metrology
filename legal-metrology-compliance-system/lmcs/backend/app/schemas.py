@@ -103,6 +103,16 @@ class ScanOut(BaseModel):
     report_id: Optional[str] = None
 
 
+class ScanDiagnosticOut(BaseModel):
+    """OCR evidence for an authorized officer reviewing a report."""
+    model_config = ConfigDict(from_attributes=True)
+    scan_id: str
+    image_original_filename: Optional[str] = None
+    raw_ocr_text: Optional[str] = None
+    extracted_fields: Optional[Any] = None
+    font_analysis: Optional[Any] = None
+
+
 # ---------- Violations / Reports ----------
 
 class ViolationOut(BaseModel):

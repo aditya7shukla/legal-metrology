@@ -35,6 +35,25 @@ ASSUMED_DPI_FALLBACK = 300
 MM_PER_INCH = 25.4
 
 
+class OCRUnavailableError(RuntimeError):
+    """Raised when the Tesseract executable cannot be used by this server."""
+
+
+class OCRExtractionError(RuntimeError):
+    """Raised when a submitted image contains no usable OCR text."""
+
+
+def ensure_tesseract_available() -> None:
+    """Fail early rather than silently evaluating an empty OCR result."""
+    try:
+        pytesseract.get_tesseract_version()
+    except Exception as exc:  # pytesseract exposes platform-specific failures
+        raise OCRUnavailableError(
+            "Tesseract OCR is not available. Install Tesseract and ensure its executable is on PATH, "
+            "or set TESSERACT_CMD to its full path before starting the backend."
+        ) from exc
+
+
 @dataclass
 class TextLine:
     text: str
@@ -625,6 +644,7 @@ def run_ocr(image_path: str) -> OcrResult:
     - grayscale / CLAHE / sharpened variants
     """
 
+    ensure_tesseract_available()
     original = load_image(image_path)
 
     h, w = original.shape[:2]
@@ -746,8 +766,15 @@ def run_ocr(image_path: str) -> OcrResult:
 
     final_h, final_w = original.shape[:2]
 
+    full_text = "\n\n".join(ocr_pass_texts).strip()
+    if not full_text:
+        raise OCRExtractionError(
+            "No readable text could be extracted from this image. Retake the photo with less glare, "
+            "better focus, and a closer view of the label."
+        )
+
     return OcrResult(
-        full_text="\n\n".join(ocr_pass_texts),
+        full_text=full_text,
         lines=merged,
         image_width_px=final_w,
         image_height_px=final_h,
